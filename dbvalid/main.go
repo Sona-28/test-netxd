@@ -20,7 +20,10 @@ type Sample struct{
 	Paragraph string `json:"paragraph" bson:"paragraph"`
 }
 
+var collection *mongo.Collection
+
 func main() {
+	DatabaseEntry()
 	engine := gin.Default()
 	engine.GET("/", handler)
 	engine.Run(":8080")
@@ -28,40 +31,47 @@ func main() {
 
 func handler(c *gin.Context) {
 	tokenString := c.GetHeader("Authorization")
-    if tokenString == "" {
+	if tokenString == "" {
 		fmt.Println("error1")
-        return
-    }
-    tokenString = strings.Replace(tokenString, "Bearer ", "", 1)
-    secretKey := []byte("your-256-bit-secret")
-    claims, err := validateAndDecodeToken(tokenString, secretKey)
-    if err != nil {
+		return
+	}
+	tokenString = strings.Replace(tokenString, "Bearer ", "", 1)
+	secretKey := []byte("your-256-bit-secret")
+	claims, err := validateAndDecodeToken(tokenString, secretKey)
+	if err != nil {
 		fmt.Println("error2")
-
-        return
-    }
-    paragraph := claims["paragraph"].(string)
-    fmt.Printf("Authenticated as: %s\n", paragraph)
+		return
+	}
+	paragraph := claims["paragraph"].(string)
+	// fmt.Printf("Authenticated as: %s\n", paragraph)
 	sample := Sample{
 		Paragraph: paragraph,
 	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	result, err := collection.InsertOne(context.Background(), sample)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Data inserted successfully", "inserted_id": result.InsertedID})
+}
+
+func DatabaseEntry(){
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel() 
 	mongoConnection := options.Client().ApplyURI(ConnectionString)
 	mongoClient, err := mongo.Connect(ctx, mongoConnection)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return 
 	}
 	if err := mongoClient.Ping(ctx, readpref.Primary()); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
+
 	fmt.Println("Database Connected")
-	collection := mongoClient.Database("k6demo").Collection("token")
-	result, err := collection.InsertOne(ctx, sample)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	}
-	c.JSON(http.StatusOK, result.InsertedID)
+	collection = mongoClient.Database("k6").Collection("token")
 }
+
 
 func validateAndDecodeToken(tokenString string, secretKey []byte) (jwt.MapClaims, error) {
     token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
